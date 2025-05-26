@@ -12,7 +12,7 @@ import (
 
 // Version information - these will be set during build
 var (
-    buildVersion string = "v0.3"
+    buildVersion string = "v0.3.1"
     buildCommit  string = "unknown"
     buildTime    string = "unknown"
 )
