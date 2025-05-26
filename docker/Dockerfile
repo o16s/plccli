@@ -38,3 +38,4 @@ ENV PATH="/usr/local/bin:/usr/bin:${PATH}"
 
 # Normal entrypoint
 ENTRYPOINT ["/entrypoint.sh"]
+CMD ["telegraf"]

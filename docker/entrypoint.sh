@@ -19,5 +19,18 @@ else
     echo "OPCUA environment variables not set. PLCCLI service will not start."
 fi
 
-# Execute the original telegraf command with all arguments
-exec /usr/bin/telegraf "$@"
+
+# Execute telegraf with all arguments
+echo "Starting Telegraf..."
+
+if [ $# -eq 0 ]; then
+    # No arguments passed - use default
+    exec /usr/bin/telegraf
+elif [ "$1" = "telegraf" ]; then
+    # First argument is "telegraf" - remove it and pass the rest
+    shift
+    exec /usr/bin/telegraf "$@"
+else
+    # Arguments passed directly (like from docker-compose command)
+    exec /usr/bin/telegraf "$@"
+fi
