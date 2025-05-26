@@ -184,8 +184,7 @@ func setNodeValue(nodeID string, value string, dataType string, port int, format
 	// Original format
 	return fmt.Sprintf("Successfully set %s to %v with type %s (via port %d)", nodeID, nodeResp.Value, dataType, port), nil
 }
-
-func getNodeValues(nodeIDs []string, port int, format string) (string, error) {
+func getNodeValues(nodeIDs []string, port int, format string, measurement string) (string, error) {
 	if len(nodeIDs) == 0 {
 		return "", fmt.Errorf("no node IDs provided")
 	}
@@ -200,7 +199,7 @@ func getNodeValues(nodeIDs []string, port int, format string) (string, error) {
 	
 	// If there's only one node ID, use the existing method
 	if len(nodeIDs) == 1 {
-		return getNodeValue(nodeIDs[0], port, format, endpoint)
+		return getNodeValue(nodeIDs[0], port, format, endpoint, measurement)
 	}
 	
 	// For multiple nodes, build a batch request
@@ -276,7 +275,7 @@ func getNodeValues(nodeIDs []string, port int, format string) (string, error) {
 			if result.Error != "" {
 				continue // Skip nodes with errors
 			}
-			lines = append(lines, formatInfluxOutput("opcua_value", nodeIDs[i], result.Value, "", endpoint))
+			lines = append(lines, formatInfluxOutput(measurement, nodeIDs[i], result.Value, "", endpoint))
 		}
 		return strings.Join(lines, "\n"), nil
 	}
@@ -293,7 +292,7 @@ func getNodeValues(nodeIDs []string, port int, format string) (string, error) {
 	return strings.Join(values, "\n"), nil
 }
 
-func getNodeValue(nodeID string, port int, format string, endpoint string) (string, error) {
+func getNodeValue(nodeID string, port int, format string, endpoint string, measurement string) (string, error) {
 	namespace, idType, identifier, err := parseNodeID(nodeID)
 	if err != nil {
 		return "", err
@@ -339,7 +338,7 @@ func getNodeValue(nodeID string, port int, format string, endpoint string) (stri
 	}
 	
 	if format == "influx" {
-		return formatInfluxOutput("opcua_value", nodeID, nodeResp.Value, "", endpoint), nil
+		return formatInfluxOutput(measurement, nodeID, nodeResp.Value, "", endpoint), nil
 	}
 	
 	// Original format

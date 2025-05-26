@@ -12,7 +12,7 @@ import (
 
 // Version information - these will be set during build
 var (
-    buildVersion string = "v0.3.2"
+    buildVersion string = "v0.3.3"
     buildCommit  string = "unknown"
     buildTime    string = "unknown"
 )
@@ -21,6 +21,7 @@ var (
 var (
     version       = flag.Bool("version", false, "Show version information")
     endpoint      = flag.String("endpoint", "opc.tcp://192.168.123.252:4840", "OPC UA Endpoint URL")
+	measurement = flag.String("measurement", "opcua_node", "Measurement name for InfluxDB output")
     username      = flag.String("username", "", "Username")
     password      = flag.String("password", "", "Password")
     certfile      = flag.String("cert", "cert.pem", "Certificate file")
@@ -196,7 +197,7 @@ func main() {
         }
         // Allow multiple node IDs
         nodeIDs := args[2:]
-        value, err := getNodeValues(nodeIDs, actualPort, *outputFormat)
+    	value, err := getNodeValues(nodeIDs, actualPort, *outputFormat, *measurement)  // Pass measurement
         if err != nil {
             handleConnectionError(err)
         }
