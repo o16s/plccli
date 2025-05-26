@@ -65,9 +65,9 @@ jobs:
           tar czf dist/plccli-linux-arm64.tar.gz plccli-linux-arm64
           zip dist/plccli-windows-amd64.zip plccli-windows-amd64.exe
       
-      # Upload artifacts to GitHub Actions
+      # Upload artifacts to GitHub Actions - using v2 instead of v3
       - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v2
         with:
           name: plccli-binaries
           path: dist/
