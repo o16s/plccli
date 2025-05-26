@@ -1,0 +1,11 @@
+version: '3'
+services:
+  plccli-telegraf:
+    image: o16s/plccli:latest
+    volumes:
+      - ./configs/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    environment:
+      - OPCUA_ENDPOINT=${OPCUA_ENDPOINT}
+      - OPCUA_USERNAME=${OPCUA_USERNAME}
+      - OPCUA_PASSWORD=${OPCUA_PASSWORD}
+    command: telegraf --config /etc/telegraf/telegraf.conf

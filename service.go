@@ -33,7 +33,8 @@ var (
 )
 
 func startService(endpoint, username, password, certfile, keyfile string, 
-                 gencert bool, appuri string, timeout, port int, verbose bool) {
+                 gencert bool, appuri string, timeout, port int, verbose bool,
+                 securityPolicy, securityMode, authMethod string) {
 	isVerbose = verbose
 	connectionPort = port
 	
@@ -168,7 +169,6 @@ func startService(endpoint, username, password, certfile, keyfile string,
 		}
 	}
 }
-
 func connectOPCUA(ctx context.Context, endpoint, username, password, certfile, keyfile string, 
                  gencert bool, appuri string, timeout int) error {
     log.Printf("[%s] Connecting to OPCUA server at %s...", connectionName, endpoint)
@@ -224,45 +224,7 @@ func connectOPCUA(ctx context.Context, endpoint, username, password, certfile, k
     log.Printf("[%s] Using certificate path: %s", connectionName, certfile)
     log.Printf("[%s] Using key path: %s", connectionName, keyfile)
     
-    // Generate certificate if needed
-    var cert []byte
-    var privateKey *rsa.PrivateKey
-    
-    if gencert {
-        log.Printf("[%s] Checking for existing certificate", connectionName)
-        // Skip regenerating cert if it exists
-        if _, err := os.Stat(certfile); os.IsNotExist(err) {
-            log.Printf("[%s] Certificate doesn't exist, generating...", connectionName)
-            certPEM, keyPEM, err := uatest.GenerateCert(appuri, 2048, 24*time.Hour)
-            if err != nil {
-                return fmt.Errorf("failed to generate cert: %v", err)
-            }
-            if err := os.WriteFile(certfile, certPEM, 0644); err != nil {
-                return fmt.Errorf("failed to write %s: %v", certfile, err)
-            }
-            if err := os.WriteFile(keyfile, keyPEM, 0644); err != nil {
-                return fmt.Errorf("failed to write %s: %v", keyfile, err)
-            }
-            log.Printf("[%s] Generated %s and %s", connectionName, certfile, keyfile)
-        } else {
-            log.Printf("[%s] Using existing certificate", connectionName)
-        }
-    }
-    
-    // Load certificate
-    log.Printf("[%s] Loading certificate...", connectionName)
-    c, err := tls.LoadX509KeyPair(certfile, keyfile)
-    if err != nil {
-        return fmt.Errorf("failed to load certificate: %v", err)
-    }
-    cert = c.Certificate[0]
-    if pk, ok := c.PrivateKey.(*rsa.PrivateKey); ok {
-        privateKey = pk
-    } else {
-        return fmt.Errorf("invalid private key type")
-    }
-    
-    // Get endpoints
+    // Get endpoints first to determine if we need certificates
     log.Printf("[%s] Getting endpoints...", connectionName)
     endpointCtx, cancel := context.WithTimeout(ctx, timeoutDuration)
     defer cancel()
@@ -272,16 +234,83 @@ func connectOPCUA(ctx context.Context, endpoint, username, password, certfile, k
         return fmt.Errorf("failed to get endpoints: %v", err)
     }
     log.Printf("[%s] Found %d endpoints", connectionName, len(endpoints))
+
+
+    // Add detailed endpoint logging
+    log.Printf("[%s] Available endpoints:", connectionName)
+    for i, e := range endpoints {
+        log.Printf("[%s]   [%d] SecurityPolicy=%s, SecurityMode=%s, TokenTypes=%v", 
+            connectionName, i, 
+            e.SecurityPolicyURI, 
+            e.SecurityMode,
+            getTokenTypes(e.UserIdentityTokens))
+    }
+
     
-    // Find compatible endpoint
+    // Determine security policy and mode from available endpoints
     var serverEndpoint *ua.EndpointDescription
+    var useAnonymous bool
+    
+    // First check if server supports anonymous authentication with no security
     for _, e := range endpoints {
-        if e.SecurityPolicyURI == ua.SecurityPolicyURIBasic256 && 
-           e.SecurityMode == ua.MessageSecurityModeSignAndEncrypt {
-            // Check if it supports username authentication
+        if e.SecurityPolicyURI == ua.SecurityPolicyURINone && 
+           e.SecurityMode == ua.MessageSecurityModeNone {
+            // Check if it supports anonymous authentication
             for _, t := range e.UserIdentityTokens {
-                if t.TokenType == ua.UserTokenTypeUserName {
+                if t.TokenType == ua.UserTokenTypeAnonymous {
                     serverEndpoint = e
+                    useAnonymous = true
+                    break
+                }
+            }
+            if serverEndpoint != nil {
+                break
+            }
+        }
+    }
+    
+    // If no anonymous endpoint was found, look for username authentication
+    if serverEndpoint == nil && username != "" {
+        // Try to find an endpoint that supports username authentication
+        for _, e := range endpoints {
+            // Prefer Basic256 with SignAndEncrypt if available
+            if e.SecurityPolicyURI == ua.SecurityPolicyURIBasic256 && 
+               e.SecurityMode == ua.MessageSecurityModeSignAndEncrypt {
+                for _, t := range e.UserIdentityTokens {
+                    if t.TokenType == ua.UserTokenTypeUserName {
+                        serverEndpoint = e
+                        break
+                    }
+                }
+                if serverEndpoint != nil {
+                    break
+                }
+            }
+        }
+        
+        // If no preferred endpoint found, try any security policy that supports username
+        if serverEndpoint == nil {
+            for _, e := range endpoints {
+                for _, t := range e.UserIdentityTokens {
+                    if t.TokenType == ua.UserTokenTypeUserName {
+                        serverEndpoint = e
+                        break
+                    }
+                }
+                if serverEndpoint != nil {
+                    break
+                }
+            }
+        }
+    }
+    
+    // If still no endpoint found, try to use anonymous authentication as fallback
+    if serverEndpoint == nil {
+        for _, e := range endpoints {
+            for _, t := range e.UserIdentityTokens {
+                if t.TokenType == ua.UserTokenTypeAnonymous {
+                    serverEndpoint = e
+                    useAnonymous = true
                     break
                 }
             }
@@ -300,16 +329,74 @@ func connectOPCUA(ctx context.Context, endpoint, username, password, certfile, k
         serverEndpoint.SecurityPolicyURI, 
         serverEndpoint.SecurityMode)
     
+    // Determine if we need certificates
+    needCertificates := serverEndpoint.SecurityPolicyURI != ua.SecurityPolicyURINone &&
+                       serverEndpoint.SecurityMode != ua.MessageSecurityModeNone
+    
+    // Generate or load certificates if needed
+    var cert []byte
+    var privateKey *rsa.PrivateKey
+    
+    if needCertificates {
+        if gencert {
+            log.Printf("[%s] Checking for existing certificate", connectionName)
+            // Skip regenerating cert if it exists
+            if _, err := os.Stat(certfile); os.IsNotExist(err) {
+                log.Printf("[%s] Certificate doesn't exist, generating...", connectionName)
+                certPEM, keyPEM, err := uatest.GenerateCert(appuri, 2048, 24*time.Hour)
+                if err != nil {
+                    return fmt.Errorf("failed to generate cert: %v", err)
+                }
+                if err := os.WriteFile(certfile, certPEM, 0644); err != nil {
+                    return fmt.Errorf("failed to write %s: %v", certfile, err)
+                }
+                if err := os.WriteFile(keyfile, keyPEM, 0644); err != nil {
+                    return fmt.Errorf("failed to write %s: %v", keyfile, err)
+                }
+                log.Printf("[%s] Generated %s and %s", connectionName, certfile, keyfile)
+            } else {
+                log.Printf("[%s] Using existing certificate", connectionName)
+            }
+        }
+        
+        // Load certificate
+        log.Printf("[%s] Loading certificate...", connectionName)
+        c, err := tls.LoadX509KeyPair(certfile, keyfile)
+        if err != nil {
+            return fmt.Errorf("failed to load certificate: %v", err)
+        }
+        cert = c.Certificate[0]
+        if pk, ok := c.PrivateKey.(*rsa.PrivateKey); ok {
+            privateKey = pk
+        } else {
+            return fmt.Errorf("invalid private key type")
+        }
+    }
+    
     // Build client options with more aggressive timeouts for reconnection
     opts := []opcua.Option{
         opcua.DialTimeout(timeoutDuration),
         opcua.RequestTimeout(timeoutDuration),
         opcua.SessionTimeout(timeoutDuration * 2), // Longer session timeout
-        opcua.AuthUsername(username, password),
-        opcua.Certificate(cert),
-        opcua.PrivateKey(privateKey),
-        opcua.SecurityFromEndpoint(serverEndpoint, ua.UserTokenTypeUserName),
         opcua.AutoReconnect(true), 
+    }
+    
+    // Add security options
+    if useAnonymous {
+        log.Printf("[%s] Using anonymous authentication", connectionName)
+        opts = append(opts, opcua.SecurityFromEndpoint(serverEndpoint, ua.UserTokenTypeAnonymous))
+    } else {
+        log.Printf("[%s] Using username authentication", connectionName)
+        opts = append(opts, 
+            opcua.AuthUsername(username, password),
+            opcua.SecurityFromEndpoint(serverEndpoint, ua.UserTokenTypeUserName))
+    }
+    
+    // Add certificate options if needed
+    if needCertificates {
+        opts = append(opts,
+            opcua.Certificate(cert),
+            opcua.PrivateKey(privateKey))
     }
     
     // Create client
@@ -382,7 +469,6 @@ func reconnectOPCUA(ctx context.Context, endpoint, username, password, certfile,
     
     log.Printf("[%s] Failed to reconnect after %d attempts, will try again on next keep-alive check", connectionName, maxRetries)
 }
-
 func handleNodeRequest(w http.ResponseWriter, r *http.Request) {
     // Get node ID components separately
     namespace := r.URL.Query().Get("namespace")
@@ -882,4 +968,26 @@ func handleBrowseRequest(w http.ResponseWriter, r *http.Request) {
     sendJSONResponseGeneric(w, map[string]interface{}{
         "nodes": result,
     })
+}
+
+
+
+// Helper function to add at the end of the file
+func getTokenTypes(tokens []*ua.UserTokenPolicy) []string {
+    var types []string
+    for _, t := range tokens {
+        switch t.TokenType {
+        case ua.UserTokenTypeAnonymous:
+            types = append(types, "Anonymous")
+        case ua.UserTokenTypeUserName:
+            types = append(types, "Username")
+        case ua.UserTokenTypeCertificate:
+            types = append(types, "Certificate")
+        case ua.UserTokenTypeIssuedToken:
+            types = append(types, "IssuedToken")
+        default:
+            types = append(types, fmt.Sprintf("Unknown(%d)", t.TokenType))
+        }
+    }
+    return types
 }
