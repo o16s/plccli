@@ -125,3 +125,10 @@ make build
 make build-mac     # For Apple Silicon
 make build-linux   # For Linux
 ```
+
+## Limitations
+
+- **Authentication Required**: Currently, `plccli` only supports authenticated sessions with username and password. Anonymous connections are not supported.
+- **Security Policy**: The tool uses Basic256 security policy with SignAndEncrypt message security mode. Support for other security policies is limited.
+- **Subscription**: Real-time value change subscriptions are not yet implemented.
+- **Complex Data Types**: Support for complex structured data types is limited.
