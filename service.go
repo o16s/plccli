@@ -130,20 +130,25 @@ func startService(endpoint, username, password, certfile, keyfile string,
 	for {
 		select {
 		case <-ticker.C:
-			// Read server time to keep connection alive
-			clientMutex.Lock()
-			if opcuaClient != nil {
-				timeNode := opcuaClient.Node(ua.NewNumericNodeID(0, 2258))
-				_, err := timeNode.Value(ctx)
-				if err != nil {
-					log.Printf("[%s] Keep-alive failed: %v", connectionName, err)
-					// Try to reconnect
-					reconnectOPCUA(ctx, endpoint, username, password, certfile, keyfile, gencert, appuri, timeout)
-				} else if isVerbose {
-					log.Printf("[%s] Keep-alive successful", connectionName)
-				}
-			}
-			clientMutex.Unlock()
+            clientMutex.Lock()
+            client := opcuaClient
+            clientMutex.Unlock()
+            
+            if client == nil {
+                log.Printf("[%s] Client is nil, attempting reconnection", connectionName)
+                reconnectOPCUA(ctx, endpoint, username, password, certfile, keyfile, gencert, appuri, timeout)
+                continue
+            }
+            
+            // Try keep-alive
+            timeNode := client.Node(ua.NewNumericNodeID(0, 2258))
+            _, err := timeNode.Value(ctx)
+            if err != nil {
+                log.Printf("[%s] Keep-alive failed: %v", connectionName, err)
+                reconnectOPCUA(ctx, endpoint, username, password, certfile, keyfile, gencert, appuri, timeout)
+            } else if isVerbose {
+                log.Printf("[%s] Keep-alive successful", connectionName)
+            }
 			
 		case <-ctx.Done():
 			// Shutdown gracefully
@@ -425,27 +430,41 @@ func connectOPCUA(ctx context.Context, endpoint, username, password, certfile, k
     return nil
 }
 
+
 func reconnectOPCUA(ctx context.Context, endpoint, username, password, certfile, keyfile string, 
                    gencert bool, appuri string, timeout int) {
     log.Printf("[%s] Attempting to reconnect...", connectionName)
+
+    // At the start of reconnectOPCUA
+    if ctx.Err() != nil {
+        log.Printf("[%s] Context already cancelled, skipping reconnection", connectionName)
+        return
+    }
     
-    // Close existing connection if any
+    // Force close existing connection if any
     clientMutex.Lock()
     if opcuaClient != nil {
         log.Printf("[%s] Closing existing connection...", connectionName)
+        // Ensure the connection is fully closed, ignore errors
         opcuaClient.Close(ctx)
+        // Important: Explicitly set to nil to ensure GC and complete cleanup
         opcuaClient = nil
     }
     clientMutex.Unlock()
     
+    // Add a small delay to ensure server-side cleanup
+    time.Sleep(2 * time.Second)
+    
     // Implement exponential backoff for reconnection
-    maxRetries := 5
+    maxRetries := 10 // Increased from 5
     for attempt := 0; attempt < maxRetries; attempt++ {
         // Create a fresh context for each attempt
         reconnectTimeout := time.Duration(timeout) * time.Second
         reconnectCtx, cancel := context.WithTimeout(context.Background(), reconnectTimeout)
         
         log.Printf("[%s] Reconnection attempt %d/%d...", connectionName, attempt+1, maxRetries)
+        
+        // Complete new connection attempt
         err := connectOPCUA(reconnectCtx, endpoint, username, password, certfile, keyfile, gencert, appuri, timeout)
         cancel()
         
@@ -469,6 +488,7 @@ func reconnectOPCUA(ctx context.Context, endpoint, username, password, certfile,
     
     log.Printf("[%s] Failed to reconnect after %d attempts, will try again on next keep-alive check", connectionName, maxRetries)
 }
+
 func handleNodeRequest(w http.ResponseWriter, r *http.Request) {
     // Get node ID components separately
     namespace := r.URL.Query().Get("namespace")
