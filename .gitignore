@@ -7,7 +7,11 @@
 *.dll
 *.so
 *.dylib
-
+cert.pem
+key.pem
+.DS_Store
+plccli
+build/*
 # Test binary, built with `go test -c`
 *.test
 

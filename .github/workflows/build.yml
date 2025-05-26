@@ -1,0 +1,87 @@
+name: Build plccli
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build:
+    name: Build Multi-Architecture Binaries
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20'  # Adjust to your Go version
+      
+      - name: Get version information
+        id: get_version
+        run: |
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION=$(git rev-parse --short HEAD)
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "BUILD_TIME=$(date -u '+%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+          echo "COMMIT_HASH=$(git rev-parse HEAD)" >> $GITHUB_ENV
+          
+      - name: Build for AMD64
+        run: |
+          GOOS=darwin GOARCH=amd64 go build -o plccli-darwin-amd64 \
+            -ldflags "-X main.buildVersion=$VERSION -X main.buildCommit=$COMMIT_HASH -X main.buildTime=$BUILD_TIME" \
+            .
+          GOOS=linux GOARCH=amd64 go build -o plccli-linux-amd64 \
+            -ldflags "-X main.buildVersion=$VERSION -X main.buildCommit=$COMMIT_HASH -X main.buildTime=$BUILD_TIME" \
+            .
+          GOOS=windows GOARCH=amd64 go build -o plccli-windows-amd64.exe \
+            -ldflags "-X main.buildVersion=$VERSION -X main.buildCommit=$COMMIT_HASH -X main.buildTime=$BUILD_TIME" \
+            .
+      
+      - name: Build for ARM64
+        run: |
+          GOOS=darwin GOARCH=arm64 go build -o plccli-darwin-arm64 \
+            -ldflags "-X main.buildVersion=$VERSION -X main.buildCommit=$COMMIT_HASH -X main.buildTime=$BUILD_TIME" \
+            .
+          GOOS=linux GOARCH=arm64 go build -o plccli-linux-arm64 \
+            -ldflags "-X main.buildVersion=$VERSION -X main.buildCommit=$COMMIT_HASH -X main.buildTime=$BUILD_TIME" \
+            .
+      
+      - name: Create Archive
+        run: |
+          mkdir -p dist
+          tar czf dist/plccli-darwin-amd64.tar.gz plccli-darwin-amd64
+          tar czf dist/plccli-darwin-arm64.tar.gz plccli-darwin-arm64
+          tar czf dist/plccli-linux-amd64.tar.gz plccli-linux-amd64
+          tar czf dist/plccli-linux-arm64.tar.gz plccli-linux-arm64
+          zip dist/plccli-windows-amd64.zip plccli-windows-amd64.exe
+      
+      # Upload artifacts to GitHub Actions
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: plccli-binaries
+          path: dist/
+          
+      # Create a GitHub release when a tag is pushed
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/plccli-darwin-amd64.tar.gz
+            dist/plccli-darwin-arm64.tar.gz
+            dist/plccli-linux-amd64.tar.gz
+            dist/plccli-linux-arm64.tar.gz
+            dist/plccli-windows-amd64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
