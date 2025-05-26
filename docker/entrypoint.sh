@@ -6,6 +6,7 @@ echo "Checking environment:"
 echo "PATH: $PATH"
 echo "plccli location: $(which plccli 2>/dev/null || echo 'Not found')"
 echo "telegraf location: $(which telegraf 2>/dev/null || echo 'Not found')"
+echo "opc ua endpoint: $OPCUA_ENDPOINT"
 
 # Start the plccli service in the background if OPCUA variables are provided
 if [ ! -z "$OPCUA_ENDPOINT" ] && [ ! -z "$OPCUA_USERNAME" ] && [ ! -z "$OPCUA_PASSWORD" ]; then
