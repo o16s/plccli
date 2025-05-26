@@ -18,8 +18,7 @@ RUN set -x \
     && mv "plccli-linux-${PLCCLI_ARCH}" /usr/bin/plccli \
     && chmod +x /usr/bin/plccli \
     && rm plccli.tar.gz \
-    && echo "Verifying plccli installation:" \
-    && file /usr/bin/plccli \
+    && echo "plccli installed successfully" \
     && /usr/bin/plccli --version
 
 # Copy entrypoint script
