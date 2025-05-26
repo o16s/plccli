@@ -12,6 +12,7 @@ key.pem
 .DS_Store
 plccli
 build/*
+*.tar.gz
 # Test binary, built with `go test -c`
 *.test
 
