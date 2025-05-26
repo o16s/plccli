@@ -1,7 +1,7 @@
 version: '3'
 services:
   plccli-telegraf:
-    image: o16s/plccli:latest
+    image: ghcr.io/o16s/plccli:latest
     volumes:
       - ./configs/telegraf.conf:/etc/telegraf/telegraf.conf:ro
     environment:
