@@ -12,7 +12,7 @@ import (
 
 // Version information - these will be set during build
 var (
-	buildVersion string = "oi"
+	buildVersion string = "v0.2"
 	buildCommit  string = "unknown"
 	buildTime    string = "unknown"
 )
@@ -32,7 +32,7 @@ var (
 	port       = flag.Int("port", 8765, "Base port for service mode")
 	connection = flag.String("connection", "default", "Connection name for multiple OPCUA connections")
 	verbose    = flag.Bool("verbose", false, "Enable verbose logging")
-	outputFormat = flag.String("format", "default", "Output format: default, json, or influx")
+	outputFormat = flag.String("format", "influx", "Output format: default, json, or influx")
 )
 
 // Calculate a port number based on connection name
@@ -161,7 +161,7 @@ func main() {
 			}
 		}
 		
-		fmt.Printf("Browsing node %s (max depth: %d)...\n", nodeID, maxDepth)
+
 		if err := browseNode(nodeID, maxDepth, actualPort, *outputFormat); err != nil {
 			handleConnectionError(err)
 		}

@@ -60,8 +60,9 @@ func formatInfluxOutput(measurementName, nodeID string, value interface{}, dataT
         ",", "\\,",
         "=", "\\=",
         " ", "\\ ",
+        "\"", "\\\"",
     )
-    
+
 	// Clean up names for InfluxDB compatibility
     cleanNodeID := tagEscaper.Replace(nodeID)
 

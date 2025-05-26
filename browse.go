@@ -55,6 +55,11 @@ func getEndpointTag(port int) string {
 
 // Browse nodes from the OPC UA server using the HTTP service
 func browseNode(startNodeID string, maxDepth int, port int, format string) error {
+
+	if format != "influx" {
+		fmt.Printf("Browsing node %s (max depth: %d)...\n", startNodeID, maxDepth)
+	}
+    
     // Create a client with timeout
     client := &http.Client{
         Timeout: 120 * time.Second,
@@ -104,36 +109,44 @@ func browseNode(startNodeID string, maxDepth int, port int, format string) error
         return fmt.Errorf("service reported error: %s", browseResp.Error)
     }
     
-     // Check format and print results accordingly
-    if format == "influx" {
-        // Print results in InfluxDB Line Protocol format
-        timestamp := time.Now().UnixNano()
-        
-        for _, node := range browseResp.Nodes {
-            // Clean up names for InfluxDB compatibility
-            measurementName := "opcua_node"
-            nodePath := strings.Replace(node.Path, " ", "_", -1)
-            nodePath = strings.Replace(nodePath, ".", "_", -1)
-            nodeId := strings.Replace(node.NodeId, ";", "_", -1)
-            nodeId = strings.Replace(nodeId, "=", "", -1)
-            nodeId = strings.Replace(nodeId, ",", "_", -1)
-            
-            // Get endpoint for the connection
-            endpointTag := getEndpointTag(port)
-            
-            // Generate line protocol format
-            // measurement,tag1=value1,tag2=value2 field1=value1,field2=value2 timestamp
-            fmt.Printf("%s,node_id=%s,path=%s,data_type=%s,endpoint=%s writable=%v,description=\"%s\" %d\n",
-                measurementName,
-                nodeId,
-                nodePath,
-                node.DataType,
-                endpointTag,
-                node.Writable,
-                strings.Replace(node.Description, "\"", "\\\"", -1),
-                timestamp)
-        }
-    } else {
+    // Check format and print results accordingly
+	if format == "influx" {
+		// Print results in InfluxDB Line Protocol format
+		timestamp := time.Now().UnixNano()
+		
+		// Create a replacer for escaping special characters in tag values
+		tagEscaper := strings.NewReplacer(
+			",", "\\,",
+			"=", "\\=",
+			" ", "\\ ",
+			"\"", "\\\"",
+		)
+		
+		for _, node := range browseResp.Nodes {
+			// Clean up names for InfluxDB compatibility - escape special characters
+			measurementName := "opcua_node"
+			
+			// Escape special characters in tag values
+			nodePath := tagEscaper.Replace(node.Path)
+			nodeId := tagEscaper.Replace(node.NodeId)
+			dataType := tagEscaper.Replace(node.DataType)
+			
+			// Get endpoint for the connection
+			endpointTag := tagEscaper.Replace(getEndpointTag(port))
+			
+			// Generate line protocol format
+			// measurement,tag1=value1,tag2=value2 field1=value1,field2=value2 timestamp
+			fmt.Printf("%s,node_id=%s,path=%s,data_type=%s,endpoint=%s writable=%v,description=\"%s\" %d\n",
+				measurementName,
+				nodeId,
+				nodePath,
+				dataType,
+				endpointTag,
+				node.Writable,
+				strings.Replace(node.Description, "\"", "\\\"", -1),
+				timestamp)
+		}
+	} else {
         // Original tabular format
         w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
         fmt.Fprintln(w, "Path\tNodeID\tDataType\tWritable\tDescription")
