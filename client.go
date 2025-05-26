@@ -54,7 +54,7 @@ func parseNodeID(nodeID string) (string, string, string, error) {
 	return namespace, idType, identifier, nil
 }
 
-// formatInfluxOutput converts a value to InfluxDB Line Protocol format
+// formatInfluxOutput converts a value to InfluxDB Line Protocol format// formatInfluxOutput converts a value to InfluxDB Line Protocol format
 func formatInfluxOutput(measurementName, nodeID string, value interface{}, dataType string, endpoint string) string {
     tagEscaper := strings.NewReplacer(
         ",", "\\,",
@@ -63,32 +63,46 @@ func formatInfluxOutput(measurementName, nodeID string, value interface{}, dataT
         "\"", "\\\"",
     )
 
-	// Clean up names for InfluxDB compatibility
+    // Clean up names for InfluxDB compatibility
     cleanNodeID := tagEscaper.Replace(nodeID)
-
-	// Clean endpoint for tags - only replace characters not allowed in InfluxDB tags
     cleanEndpoint := tagEscaper.Replace(endpoint)
 
-	// Handle different value types
-	var valueStr string
-	switch v := value.(type) {
-	case string:
-		valueStr = fmt.Sprintf("value=\"%s\"", strings.Replace(v, "\"", "\\\"", -1))
-	case bool:
-		valueStr = fmt.Sprintf("value=%v", v)
-	case float64, float32, int, int32, int64, uint, uint32, uint64:
-		valueStr = fmt.Sprintf("value=%v", v)
-	default:
-		valueStr = fmt.Sprintf("value=\"%v\"", v)
-	}
-	
-	timestamp := time.Now().UnixNano()
-	return fmt.Sprintf("%s,node_id=%s,endpoint=%s %s %d", 
-		measurementName, 
-		cleanNodeID,
-		cleanEndpoint,
-		valueStr, 
-		timestamp)
+    // Handle different value types - FIXED TO OUTPUT NUMERIC VALUES
+    var valueStr string
+    switch v := value.(type) {
+    case string:
+        // Try to parse timestamp strings to unix time
+        if t, err := time.Parse("2006-01-02T15:04:05.999999Z", v); err == nil {
+            // Convert timestamp to unix nanoseconds (numeric)
+            valueStr = fmt.Sprintf("value=%d", t.UnixNano())
+        } else if t, err := time.Parse("2006-01-02T15:04:05Z", v); err == nil {
+            // Try without microseconds
+            valueStr = fmt.Sprintf("value=%d", t.UnixNano())
+        } else {
+            // For non-timestamp strings, create a constant numeric value and keep string as tag
+            valueStr = fmt.Sprintf("value=1,string_value=\"%s\"", strings.Replace(v, "\"", "\\\"", -1))
+        }
+    case bool:
+        // Convert boolean to numeric (0 or 1)
+        if v {
+            valueStr = "value=1"
+        } else {
+            valueStr = "value=0"
+        }
+    case float64, float32, int, int32, int64, uint, uint32, uint64:
+        valueStr = fmt.Sprintf("value=%v", v)
+    default:
+        // Fallback: convert to string and add numeric constant
+        valueStr = fmt.Sprintf("value=1,string_value=\"%v\"", v)
+    }
+    
+    timestamp := time.Now().UnixNano()
+    return fmt.Sprintf("%s,node_id=%s,endpoint=%s %s %d", 
+        measurementName, 
+        cleanNodeID,
+        cleanEndpoint,
+        valueStr, 
+        timestamp)
 }
 
 func setNodeValue(nodeID string, value string, dataType string, port int, format string) (string, error) {

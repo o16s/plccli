@@ -9,3 +9,4 @@ services:
       - OPCUA_USERNAME=${OPCUA_USERNAME}
       - OPCUA_PASSWORD=${OPCUA_PASSWORD}
     command: telegraf --config /etc/telegraf/telegraf.conf
+    network_mode: host
