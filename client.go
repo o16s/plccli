@@ -54,7 +54,7 @@ func parseNodeID(nodeID string) (string, string, string, error) {
 	return namespace, idType, identifier, nil
 }
 
-// formatInfluxOutput converts a value to InfluxDB Line Protocol format// formatInfluxOutput converts a value to InfluxDB Line Protocol format
+// formatInfluxOutput converts a value to InfluxDB Line Protocol format
 func formatInfluxOutput(measurementName, nodeID string, value interface{}, dataType string, endpoint string) string {
     tagEscaper := strings.NewReplacer(
         ",", "\\,",
@@ -105,7 +105,7 @@ func formatInfluxOutput(measurementName, nodeID string, value interface{}, dataT
         timestamp)
 }
 
-func setNodeValue(nodeID string, value string, dataType string, port int, format string) (string, error) {
+func setNodeValue(nodeID string, value string, dataType string, host string, port int, format string) (string, error) {
 	namespace, idType, identifier, err := parseNodeID(nodeID)
 	if err != nil {
 		return "", err
@@ -131,8 +131,8 @@ func setNodeValue(nodeID string, value string, dataType string, port int, format
 		return "", fmt.Errorf("failed to create request: %v", err)
 	}
 	
-	// Build the request URL with port
-	reqURL := fmt.Sprintf("http://localhost:%d/api/node", port)
+	// Build the request URL with host and port
+	reqURL := fmt.Sprintf("http://%s:%d/api/node", host, port)
 	
 	// Create a client with timeout
 	client := &http.Client{
@@ -143,7 +143,7 @@ func setNodeValue(nodeID string, value string, dataType string, port int, format
 	resp, err := client.Post(reqURL, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		// Enhanced error message with connection details
-		return "", fmt.Errorf("cannot connect to OPCUA service on port %d: %v (is it running?)", port, err)
+		return "", fmt.Errorf("cannot connect to OPCUA service on %s:%d: %v (is it running?)", host, port, err)
 	}
 	defer resp.Body.Close()
 	
@@ -170,7 +170,7 @@ func setNodeValue(nodeID string, value string, dataType string, port int, format
 	}
 	
 	// Get endpoint for the connection
-	info, err := getConnectionInfo(port)
+	info, err := getConnectionInfo(host, port)
 	if err != nil {
 		// If we can't get the endpoint, just use a placeholder
 		info = map[string]interface{}{"endpoint": "unknown"}
@@ -182,15 +182,16 @@ func setNodeValue(nodeID string, value string, dataType string, port int, format
 	}
 
 	// Original format
-	return fmt.Sprintf("Successfully set %s to %v with type %s (via port %d)", nodeID, nodeResp.Value, dataType, port), nil
+	return fmt.Sprintf("Successfully set %s to %v with type %s (via %s:%d)", nodeID, nodeResp.Value, dataType, host, port), nil
 }
-func getNodeValues(nodeIDs []string, port int, format string, measurement string) (string, error) {
+
+func getNodeValues(nodeIDs []string, host string, port int, format string, measurement string) (string, error) {
 	if len(nodeIDs) == 0 {
 		return "", fmt.Errorf("no node IDs provided")
 	}
 	
 	// Get endpoint for the connection
-	info, err := getConnectionInfo(port)
+	info, err := getConnectionInfo(host, port)
 	if err != nil {
 		// If we can't get the endpoint, just use a placeholder
 		info = map[string]interface{}{"endpoint": "unknown"}
@@ -199,7 +200,7 @@ func getNodeValues(nodeIDs []string, port int, format string, measurement string
 	
 	// If there's only one node ID, use the existing method
 	if len(nodeIDs) == 1 {
-		return getNodeValue(nodeIDs[0], port, format, endpoint, measurement)
+		return getNodeValue(nodeIDs[0], host, port, format, endpoint, measurement)
 	}
 	
 	// For multiple nodes, build a batch request
@@ -226,8 +227,8 @@ func getNodeValues(nodeIDs []string, port int, format string, measurement string
 		return "", fmt.Errorf("failed to create request: %v", err)
 	}
 	
-	// Build the request URL with port
-	reqURL := fmt.Sprintf("http://localhost:%d/api/nodes", port)
+	// Build the request URL with host and port
+	reqURL := fmt.Sprintf("http://%s:%d/api/nodes", host, port)
 	
 	// Create a client with timeout
 	client := &http.Client{
@@ -238,7 +239,7 @@ func getNodeValues(nodeIDs []string, port int, format string, measurement string
 	resp, err := client.Post(reqURL, "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		// Enhanced error message with connection details
-		return "", fmt.Errorf("cannot connect to OPCUA service on port %d: %v (is it running?)", port, err)
+		return "", fmt.Errorf("cannot connect to OPCUA service on %s:%d: %v (is it running?)", host, port, err)
 	}
 	defer resp.Body.Close()
 	
@@ -292,15 +293,15 @@ func getNodeValues(nodeIDs []string, port int, format string, measurement string
 	return strings.Join(values, "\n"), nil
 }
 
-func getNodeValue(nodeID string, port int, format string, endpoint string, measurement string) (string, error) {
+func getNodeValue(nodeID string, host string, port int, format string, endpoint string, measurement string) (string, error) {
 	namespace, idType, identifier, err := parseNodeID(nodeID)
 	if err != nil {
 		return "", err
 	}
 	
-	// Build the request URL with separate parameters and port
-	reqURL := fmt.Sprintf("http://localhost:%d/api/node?namespace=%s&type=%s&identifier=%s", 
-		port, url.QueryEscape(namespace), url.QueryEscape(idType), url.QueryEscape(identifier))
+	// Build the request URL with host, port and parameters
+	reqURL := fmt.Sprintf("http://%s:%d/api/node?namespace=%s&type=%s&identifier=%s", 
+		host, port, url.QueryEscape(namespace), url.QueryEscape(idType), url.QueryEscape(identifier))
 	
 	// Create a client with timeout
 	client := &http.Client{
@@ -311,7 +312,7 @@ func getNodeValue(nodeID string, port int, format string, endpoint string, measu
 	resp, err := client.Get(reqURL)
 	if err != nil {
 		// Enhanced error message with connection details
-		return "", fmt.Errorf("cannot connect to OPCUA service on port %d: %v (is it running?)", port, err)
+		return "", fmt.Errorf("cannot connect to OPCUA service on %s:%d: %v (is it running?)", host, port, err)
 	}
 	defer resp.Body.Close()
 	
@@ -346,19 +347,19 @@ func getNodeValue(nodeID string, port int, format string, endpoint string, measu
 }
 
 // Add this function to get information about a connection
-func getConnectionInfo(port int) (map[string]interface{}, error) {
+func getConnectionInfo(host string, port int) (map[string]interface{}, error) {
 	// Create a client with timeout
 	client := &http.Client{
 		Timeout: 2 * time.Second,
 	}
 	
-	// Build the request URL with port
-	reqURL := fmt.Sprintf("http://localhost:%d/api/info", port)
+	// Build the request URL with host and port
+	reqURL := fmt.Sprintf("http://%s:%d/api/info", host, port)
 	
 	// Make the request
 	resp, err := client.Get(reqURL)
 	if err != nil {
-		return nil, fmt.Errorf("cannot connect to OPCUA service on port %d: %v", port, err)
+		return nil, fmt.Errorf("cannot connect to OPCUA service on %s:%d: %v", host, port, err)
 	}
 	defer resp.Body.Close()
 	

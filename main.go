@@ -12,7 +12,7 @@ import (
 
 // Version information - these will be set during build
 var (
-    buildVersion string = "v0.3.3"
+    buildVersion string = "v0.3.4"
     buildCommit  string = "unknown"
     buildTime    string = "unknown"
 )
@@ -20,8 +20,9 @@ var (
 // Common flags
 var (
     version       = flag.Bool("version", false, "Show version information")
+    serviceHost   = flag.String("service-host", "localhost", "Host/IP address of the OPCUA service")
     endpoint      = flag.String("endpoint", "opc.tcp://192.168.123.252:4840", "OPC UA Endpoint URL")
-	measurement = flag.String("measurement", "opcua_node", "Measurement name for InfluxDB output")
+    measurement   = flag.String("measurement", "opcua_node", "Measurement name for InfluxDB output")
     username      = flag.String("username", "", "Username")
     password      = flag.String("password", "", "Password")
     certfile      = flag.String("cert", "cert.pem", "Certificate file")
@@ -72,6 +73,11 @@ func printUsage() {
     fmt.Println("\nOutput formats (--format flag):")
     fmt.Println("  default - Human-readable output")
     fmt.Println("  influx  - InfluxDB Line Protocol format")
+    fmt.Println("\nInfluxDB options:")
+    fmt.Println("  --measurement <name> - Custom measurement name for InfluxDB output (default: opcua_node)")
+    fmt.Println("\nService connection:")
+    fmt.Println("  --service-host <host> - Host/IP address of the OPCUA service (default: localhost)")
+    fmt.Println("  --port <port> - Base port for service mode (default: 8765)")
     fmt.Println("\nAuthentication options:")
     fmt.Println("  --auth-method UserName (default) - Use username/password authentication")
     fmt.Println("  --auth-method Anonymous - Use anonymous authentication (no credentials)")
@@ -79,6 +85,10 @@ func printUsage() {
     fmt.Println("  --security-policy None|Basic128Rsa15|Basic256|Basic256Sha256")
     fmt.Println("  --security-mode None|Sign|SignAndEncrypt")
     fmt.Println("\nMultiple connections: Use --connection <name> to specify which connection to use")
+    fmt.Println("\nExamples:")
+    fmt.Println("  plccli --service --endpoint opc.tcp://192.168.1.100:4840 --username user --password pass")
+    fmt.Println("  plccli --format influx --measurement temperature opcua get ns=0;i=2258")
+    fmt.Println("  plccli --service-host 192.168.1.50 opcua get ns=0;i=2258")
     fmt.Printf("\nplccli %s (%s, built %s)\n", buildVersion, buildCommit, buildTime)
     flag.PrintDefaults()
 }
@@ -157,8 +167,8 @@ func main() {
         }
 
         startService(*endpoint, *username, *password, actualCertFile, actualKeyFile,
-			*gencert, *appuri, *timeout, actualPort, *verbose, 
-			*securityPolicy, *securityMode, *authMethod)
+            *gencert, *appuri, *timeout, actualPort, *verbose, 
+            *securityPolicy, *securityMode, *authMethod)
         return
     }
 
@@ -185,7 +195,7 @@ func main() {
             }
         }
         
-        if err := browseNode(nodeID, maxDepth, actualPort, *outputFormat); err != nil {
+        if err := browseNode(nodeID, maxDepth, *serviceHost, actualPort, *outputFormat); err != nil {
             handleConnectionError(err)
         }
 
@@ -195,9 +205,8 @@ func main() {
             printUsage()
             os.Exit(1)
         }
-        // Allow multiple node IDs
         nodeIDs := args[2:]
-    	value, err := getNodeValues(nodeIDs, actualPort, *outputFormat, *measurement)  // Pass measurement
+        value, err := getNodeValues(nodeIDs, *serviceHost, actualPort, *outputFormat, *measurement)
         if err != nil {
             handleConnectionError(err)
         }
@@ -213,12 +222,12 @@ func main() {
         value := args[3]
         dataType := args[4]
 
-        result, err := setNodeValue(nodeID, value, dataType, actualPort, *outputFormat)
+        result, err := setNodeValue(nodeID, value, dataType, *serviceHost, actualPort, *outputFormat)
         if err != nil {
             handleConnectionError(err)
         }
         fmt.Println(result)
-
+        
     default:
         fmt.Printf("Unknown command: %s\n\n", args[1])
         printUsage()

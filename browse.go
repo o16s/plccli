@@ -30,9 +30,9 @@ type NodeInfo struct {
 }
 
 // getEndpointTag gets a cleaned endpoint tag for InfluxDB format
-func getEndpointTag(port int) string {
+func getEndpointTag(host string, port int) string {
     // Get connection info to extract endpoint
-    info, err := getConnectionInfo(port)
+    info, err := getConnectionInfo(host, port)
     if err != nil {
         return "unknown"
     }
@@ -54,7 +54,7 @@ func getEndpointTag(port int) string {
 }
 
 // Browse nodes from the OPC UA server using the HTTP service
-func browseNode(startNodeID string, maxDepth int, port int, format string) error {
+func browseNode(startNodeID string, maxDepth int, host string, port int, format string) error {
 
 	if format != "influx" {
 		fmt.Printf("Browsing node %s (max depth: %d)...\n", startNodeID, maxDepth)
@@ -65,14 +65,14 @@ func browseNode(startNodeID string, maxDepth int, port int, format string) error
         Timeout: 120 * time.Second,
     }
     
-    // Build the request URL with port
-    reqURL := fmt.Sprintf("http://localhost:%d/api/browse?nodeid=%s&maxdepth=%d", 
-        port, url.QueryEscape(startNodeID), maxDepth)
+    // Build the request URL with host and port
+    reqURL := fmt.Sprintf("http://%s:%d/api/browse?nodeid=%s&maxdepth=%d", 
+        host, port, url.QueryEscape(startNodeID), maxDepth)
     
     // Make the request
     resp, err := client.Get(reqURL)
     if err != nil {
-        return fmt.Errorf("cannot connect to OPCUA service on port %d: %v (is it running?)", port, err)
+        return fmt.Errorf("cannot connect to OPCUA service on %s:%d: %v (is it running?)", host, port, err)
     }
     defer resp.Body.Close()
     
@@ -132,7 +132,7 @@ func browseNode(startNodeID string, maxDepth int, port int, format string) error
 			dataType := tagEscaper.Replace(node.DataType)
 			
 			// Get endpoint for the connection
-			endpointTag := tagEscaper.Replace(getEndpointTag(port))
+			endpointTag := tagEscaper.Replace(getEndpointTag(host, port))
 			
 			// Generate line protocol format
 			// measurement,tag1=value1,tag2=value2 field1=value1,field2=value2 timestamp
