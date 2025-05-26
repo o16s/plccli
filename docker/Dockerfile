@@ -1,11 +1,14 @@
 FROM telegraf:latest
 
-# Install dependencies
+# Install dependencies including networking tools
 RUN apt-get update && apt-get install -y \
     curl \
     bash \
     procps \
     findutils \
+    iputils-ping \
+    iproute2 \
+    net-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # Install plccli for the correct architecture
