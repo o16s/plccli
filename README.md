@@ -1,20 +1,3 @@
-:::thinking
-I'll write a comprehensive README.md file for the plccli tool with a focus on quick installation instructions for macOS users. I'll include:
-
-1. Project introduction - what plccli is and what it does
-2. Installation instructions for macOS (both Intel and Apple Silicon)
-3. Basic usage examples
-4. Configuration information
-5. Common commands
-6. Troubleshooting
-
-For macOS installation, I'll include:
-- Homebrew installation if applicable
-- Manual binary installation
-- Building from source
-
-Let me draft this README with a professional and clear structure.
-:::
 # plccli - OPC UA Command Line Interface
 
 `plccli` is a powerful command-line tool for interacting with OPC UA servers. It provides a simple interface for reading and writing values, browsing node structures, and connecting to industrial automation systems.
