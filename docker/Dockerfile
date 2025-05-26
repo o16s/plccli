@@ -8,24 +8,19 @@ RUN apt-get update && apt-get install -y \
     findutils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install plccli with verbose debugging
+# Install plccli for the correct architecture
 RUN set -x \
-    && curl -s https://raw.githubusercontent.com/o16s/plccli/main/install.sh > /tmp/install.sh \
-    && cat /tmp/install.sh \
-    && bash /tmp/install.sh \
-    && echo "Finding plccli binary:" \
-    && find / -name "plccli*" 2>/dev/null || echo "Not found" \
-    && mkdir -p /usr/bin \
-    && if [ -f /usr/local/bin/plccli ]; then \
-          cp -v /usr/local/bin/plccli /usr/bin/plccli; \
-       elif [ -f /root/.local/bin/plccli ]; then \
-          cp -v /root/.local/bin/plccli /usr/bin/plccli; \
-       elif [ -f /usr/bin/plccli ]; then \
-          echo "plccli already in /usr/bin"; \
-       else \
-          find / -name "plccli*" 2>/dev/null | xargs -I{} cp -v {} /usr/bin/plccli || echo "Could not find plccli"; \
-       fi \
-    && ls -la /usr/bin/plccli || echo "Failed to create /usr/bin/plccli"
+    && ARCH=$(uname -m) \
+    && if [ "$ARCH" = "aarch64" ]; then PLCCLI_ARCH="arm64"; elif [ "$ARCH" = "x86_64" ]; then PLCCLI_ARCH="amd64"; else PLCCLI_ARCH="amd64"; fi \
+    && echo "Detected architecture: $ARCH, using plccli arch: $PLCCLI_ARCH" \
+    && curl -L "https://github.com/o16s/plccli/releases/latest/download/plccli-linux-${PLCCLI_ARCH}.tar.gz" -o plccli.tar.gz \
+    && tar -xzf plccli.tar.gz \
+    && mv "plccli-linux-${PLCCLI_ARCH}" /usr/bin/plccli \
+    && chmod +x /usr/bin/plccli \
+    && rm plccli.tar.gz \
+    && echo "Verifying plccli installation:" \
+    && file /usr/bin/plccli \
+    && /usr/bin/plccli --version
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh
@@ -42,5 +37,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 # Set PATH explicitly
 ENV PATH="/usr/local/bin:/usr/bin:${PATH}"
 
-# Entrypoint that shows where plccli might be
-ENTRYPOINT ["bash", "-c", "echo 'Final check:' && find / -name plccli* 2>/dev/null || echo 'Not found' && exec /entrypoint.sh"]
+# Normal entrypoint
+ENTRYPOINT ["/entrypoint.sh"]
