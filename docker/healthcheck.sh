@@ -8,7 +8,7 @@ fi
 
 # Try to get server time to verify service is responsive
 # Using ns=0;i=2258 which is the CurrentTime node in the Server object
-if ! plccli opcua get ns=0;i=2258 > /dev/null 2>&1; then
+if ! plccli opcua get ns=0,i=2258 > /dev/null 2>&1; then
     echo "PLCCLI service is not responding"
     exit 1
 fi
