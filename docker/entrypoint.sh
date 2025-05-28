@@ -10,11 +10,11 @@ echo "opc ua endpoint: $OPCUA_ENDPOINT"
 
 # Start the plccli service in the background if OPCUA variables are provided
 if [ ! -z "$OPCUA_ENDPOINT" ] && [ ! -z "$OPCUA_USERNAME" ] && [ ! -z "$OPCUA_PASSWORD" ]; then
-    echo "Starting PLCCLI service..."
+    echo "Starting PLCCLI service (waiting 1 minute)..."
     /usr/bin/plccli --service --endpoint "$OPCUA_ENDPOINT" --username "$OPCUA_USERNAME" --password "$OPCUA_PASSWORD" &
     
     # Give the service a moment to start
-    sleep 2
+    sleep 60
     echo "PLCCLI service started"
 else
     echo "OPCUA environment variables not set. PLCCLI service will not start."
