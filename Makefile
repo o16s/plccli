@@ -17,11 +17,25 @@ LD_FLAGS = -X 'main.buildVersion=$(VERSION)' \
            -X 'main.buildCommit=$(COMMIT)' \
            -X 'main.buildTime=$(BUILD_TIME)'
 
-.PHONY: all build clean build-mac build-linux fix
+.PHONY: all build clean build-mac build-linux fix test test-coverage test-verbose
 
 # Default target: build for current platform
 build:
 	go build -ldflags="$(LD_FLAGS)" -o $(BINARY_NAME) $(MAIN_PACKAGE)
+
+# Run tests
+test:
+	go test -v ./...
+
+# Run tests with coverage
+test-coverage:
+	go test -v -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report generated: coverage.html"
+
+# Run tests with verbose output and race detector
+test-verbose:
+	go test -v -race -coverprofile=coverage.out ./...
 
 # Fix common code issues before building
 fix:

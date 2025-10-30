@@ -104,6 +104,112 @@ temperature_value{node_id="ns=3;s=Temperature",endpoint="opc.tcp://192.168.1.100
 pressure_value{node_id="ns=3;s=Pressure",endpoint="opc.tcp://192.168.1.100:4840"} 2.1
 ```
 
+### Bit Extraction for Alarm Monitoring
+
+`plccli` can extract individual bits from uint32 alarm/status fields, making it easy to monitor each alarm condition separately in InfluxDB.
+
+#### Use Case
+
+Many PLCs use 32-bit fields where each bit represents a different alarm or status condition:
+- Bit 0: Motor fault
+- Bit 7: Drive fault
+- Bit 27: Light curtain triggered
+- etc.
+
+Instead of monitoring the entire uint32 value, you can extract all 32 bits as individual metrics.
+
+#### Basic Bit Extraction
+
+```bash
+# Extract all 32 bits individually with default names (bit_0, bit_1, ..., bit_31)
+plccli --bits --format influx --measurement event_rack opcua get "ns=5;s=\"Root\".\"Objects\".\"event_rack\""
+```
+
+**Output:** 32 lines of InfluxDB data, one per bit:
+```
+event_rack,node_id=ns\=5;s\=\"Root\".\"Objects\".\"event_rack\",endpoint=opc.tcp://172.18.11.10:4840,bit=0,bit_name=bit_0 value=0 1761836282581869000
+event_rack,node_id=ns\=5;s\=\"Root\".\"Objects\".\"event_rack\",endpoint=opc.tcp://172.18.11.10:4840,bit=1,bit_name=bit_1 value=0 1761836282581869000
+...
+event_rack,node_id=ns\=5;s\=\"Root\".\"Objects\".\"event_rack\",endpoint=opc.tcp://172.18.11.10:4840,bit=7,bit_name=bit_7 value=1 1761836282581869000
+...
+```
+
+#### Semantic Alarm Names
+
+Use `--bit-names` to provide meaningful names for each of the 32 bits:
+
+```bash
+plccli --bits \
+  --bit-names "motor_fault,temp_high,pressure_low,estop_active,guard_open,hydraulic_fail,encoder_error,drive_fault,overload,undervoltage,phase_loss,contactor_fail,brake_fail,cooling_fail,lubrication_low,vibration_high,bearing_temp,winding_temp,current_limit,torque_limit,position_error,speed_limit,cable_break,sensor_fail,power_supply,network_lost,safety_relay,light_curtain,interlock,maintenance,reserved_30,reserved_31" \
+  --format influx \
+  --measurement event_rack \
+  opcua get "ns=5;s=\"Root\".\"Objects\".\"event_rack\""
+```
+
+**Output:**
+```
+event_rack,...,bit=0,bit_name=motor_fault value=0 ...
+event_rack,...,bit=7,bit_name=drive_fault value=1 ...
+event_rack,...,bit=27,bit_name=light_curtain value=1 ...
+```
+
+#### Telegraf Configuration for Multiple PLCs
+
+Monitor alarm bits from multiple PLCs:
+
+```toml
+[[inputs.exec]]
+  commands = [
+    "plccli --connection plc1 --bits --bit-names 'motor_fault,temp_high,pressure_low,...' --format influx --measurement event_rack opcua get 'ns=5;s=event_rack'",
+    "plccli --connection plc2 --bits --bit-names 'motor_fault,temp_high,pressure_low,...' --format influx --measurement event_rack opcua get 'ns=5;s=event_rack'",
+    "plccli --connection plc3 --bits --bit-names 'motor_fault,temp_high,pressure_low,...' --format influx --measurement event_rack opcua get 'ns=5;s=event_rack'",
+  ]
+  data_format = "influx"
+  interval = "10s"
+  timeout = "15s"
+
+[[outputs.influxdb_v2]]
+  urls = ["http://localhost:8086"]
+  token = "$INFLUX_TOKEN"
+  organization = "factory"
+  bucket = "alarms"
+```
+
+#### InfluxDB Queries for Alerting
+
+Query individual alarm conditions:
+
+```flux
+// Check if drive_fault (bit 7) is active on any PLC
+from(bucket: "alarms")
+  |> range(start: -5m)
+  |> filter(fn: (r) => r._measurement == "event_rack")
+  |> filter(fn: (r) => r.bit_name == "drive_fault")
+  |> filter(fn: (r) => r._value == 1)
+
+// Count active alarms per PLC
+from(bucket: "alarms")
+  |> range(start: -1h)
+  |> filter(fn: (r) => r._measurement == "event_rack")
+  |> filter(fn: (r) => r._value == 1)
+  |> group(by: ["endpoint"])
+  |> count()
+
+// Alert on specific alarm combinations
+from(bucket: "alarms")
+  |> range(start: -1m)
+  |> filter(fn: (r) => r._measurement == "event_rack")
+  |> filter(fn: (r) => r.bit_name == "estop_active" or r.bit_name == "safety_relay")
+  |> filter(fn: (r) => r._value == 1)
+```
+
+#### Requirements
+
+- `--bits` requires `--format influx`
+- `--bit-names` must provide exactly 32 comma-separated names (or omit for default names)
+- Only works with uint32 values
+- Bit order: Bit 0 = LSB, Bit 31 = MSB
+
 ## Advanced Features
 
 ### Remote Service Connections
@@ -194,12 +300,15 @@ services:
 - `--password <pass>` - Authentication password
 - `--format <format>` - Output format (default, influx)
 - `--measurement <name>` - InfluxDB measurement name (default: opcua_node)
+- `--bits` - Extract all 32 bits individually from uint32 value (requires --format influx)
+- `--bit-names <names>` - Comma-separated names for all 32 bits (must be exactly 32 names)
 - `--service-host <host>` - Service host/IP (default: localhost)
 - `--port <port>` - Service port (default: 8765)
 - `--connection <name>` - Connection name for multiple connections
 - `--auth-method <method>` - Authentication method (UserName, Anonymous)
 - `--security-policy <policy>` - Security policy (None, Basic128Rsa15, Basic256, Basic256Sha256)
 - `--security-mode <mode>` - Security mode (None, Sign, SignAndEncrypt)
+- `--timeout <seconds>` - All timeouts in seconds (default: 300)
 
 ### Available Data Types for Writing
 

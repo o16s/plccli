@@ -97,12 +97,73 @@ func formatInfluxOutput(measurementName, nodeID string, value interface{}, dataT
     }
     
     timestamp := time.Now().UnixNano()
-    return fmt.Sprintf("%s,node_id=%s,endpoint=%s %s %d", 
-        measurementName, 
+    return fmt.Sprintf("%s,node_id=%s,endpoint=%s %s %d",
+        measurementName,
         cleanNodeID,
         cleanEndpoint,
-        valueStr, 
+        valueStr,
         timestamp)
+}
+
+// formatInfluxOutputWithBits formats a uint32 value with bit expansion for InfluxDB
+// Returns a slice of InfluxDB line protocol strings, one for each of the 32 bits
+func formatInfluxOutputWithBits(measurementName, nodeID string, value interface{}, endpoint string, bitNames []string) ([]string, error) {
+	tagEscaper := strings.NewReplacer(
+		",", "\\,",
+		"=", "\\=",
+		" ", "\\ ",
+		"\"", "\\\"",
+	)
+
+	// Convert value to uint32
+	var uint32Value uint32
+	switch v := value.(type) {
+	case float64:
+		uint32Value = uint32(v)
+	case float32:
+		uint32Value = uint32(v)
+	case int:
+		uint32Value = uint32(v)
+	case int32:
+		uint32Value = uint32(v)
+	case int64:
+		uint32Value = uint32(v)
+	case uint:
+		uint32Value = uint32(v)
+	case uint32:
+		uint32Value = v
+	case uint64:
+		uint32Value = uint32(v)
+	default:
+		return nil, fmt.Errorf("value type %T cannot be converted to uint32 for bit extraction", value)
+	}
+
+	// Extract all 32 bits
+	bits, err := extractBits(uint32Value, bitNames)
+	if err != nil {
+		return nil, err
+	}
+
+	// Format each bit as a separate InfluxDB line
+	cleanNodeID := tagEscaper.Replace(nodeID)
+	cleanEndpoint := tagEscaper.Replace(endpoint)
+	timestamp := time.Now().UnixNano()
+
+	lines := make([]string, 0, len(bits))
+	for _, bit := range bits {
+		cleanBitName := tagEscaper.Replace(bit.Name)
+		line := fmt.Sprintf("%s,node_id=%s,endpoint=%s,bit=%d,bit_name=%s value=%d %d",
+			measurementName,
+			cleanNodeID,
+			cleanEndpoint,
+			bit.BitNum,
+			cleanBitName,
+			bit.Value,
+			timestamp)
+		lines = append(lines, line)
+	}
+
+	return lines, nil
 }
 
 func setNodeValue(nodeID string, value string, dataType string, host string, port int, format string) (string, error) {
@@ -185,11 +246,25 @@ func setNodeValue(nodeID string, value string, dataType string, host string, por
 	return fmt.Sprintf("Successfully set %s to %v with type %s (via %s:%d)", nodeID, nodeResp.Value, dataType, host, port), nil
 }
 
-func getNodeValues(nodeIDs []string, host string, port int, format string, measurement string) (string, error) {
+func getNodeValues(nodeIDs []string, host string, port int, format string, measurement string, extractBits bool, bitNamesStr string) (string, error) {
 	if len(nodeIDs) == 0 {
 		return "", fmt.Errorf("no node IDs provided")
 	}
-	
+
+	// Parse bit names if provided
+	var bitNames []string
+	if bitNamesStr != "" {
+		bitNames = strings.Split(bitNamesStr, ",")
+		// Trim whitespace from each name
+		for i := range bitNames {
+			bitNames[i] = strings.TrimSpace(bitNames[i])
+		}
+		// Validate bit names
+		if err := validateBitNames(bitNames); err != nil {
+			return "", err
+		}
+	}
+
 	// Get endpoint for the connection
 	info, err := getConnectionInfo(host, port)
 	if err != nil {
@@ -197,10 +272,10 @@ func getNodeValues(nodeIDs []string, host string, port int, format string, measu
 		info = map[string]interface{}{"endpoint": "unknown"}
 	}
 	endpoint, _ := info["endpoint"].(string)
-	
+
 	// If there's only one node ID, use the existing method
 	if len(nodeIDs) == 1 {
-		return getNodeValue(nodeIDs[0], host, port, format, endpoint, measurement)
+		return getNodeValue(nodeIDs[0], host, port, format, endpoint, measurement, extractBits, bitNames)
 	}
 	
 	// For multiple nodes, build a batch request
@@ -276,7 +351,17 @@ func getNodeValues(nodeIDs []string, host string, port int, format string, measu
 			if result.Error != "" {
 				continue // Skip nodes with errors
 			}
-			lines = append(lines, formatInfluxOutput(measurement, nodeIDs[i], result.Value, "", endpoint))
+
+			// Check if bit expansion is requested
+			if extractBits {
+				bitLines, err := formatInfluxOutputWithBits(measurement, nodeIDs[i], result.Value, endpoint, bitNames)
+				if err != nil {
+					return "", fmt.Errorf("bit expansion failed for %s: %v", nodeIDs[i], err)
+				}
+				lines = append(lines, bitLines...)
+			} else {
+				lines = append(lines, formatInfluxOutput(measurement, nodeIDs[i], result.Value, "", endpoint))
+			}
 		}
 		return strings.Join(lines, "\n"), nil
 	}
@@ -293,7 +378,7 @@ func getNodeValues(nodeIDs []string, host string, port int, format string, measu
 	return strings.Join(values, "\n"), nil
 }
 
-func getNodeValue(nodeID string, host string, port int, format string, endpoint string, measurement string) (string, error) {
+func getNodeValue(nodeID string, host string, port int, format string, endpoint string, measurement string, extractBits bool, bitNames []string) (string, error) {
 	namespace, idType, identifier, err := parseNodeID(nodeID)
 	if err != nil {
 		return "", err
@@ -339,9 +424,17 @@ func getNodeValue(nodeID string, host string, port int, format string, endpoint 
 	}
 	
 	if format == "influx" {
+		// Check if bit expansion is requested
+		if extractBits {
+			bitLines, err := formatInfluxOutputWithBits(measurement, nodeID, nodeResp.Value, endpoint, bitNames)
+			if err != nil {
+				return "", fmt.Errorf("bit expansion failed: %v", err)
+			}
+			return strings.Join(bitLines, "\n"), nil
+		}
 		return formatInfluxOutput(measurement, nodeID, nodeResp.Value, "", endpoint), nil
 	}
-	
+
 	// Original format
 	return fmt.Sprintf("%v", nodeResp.Value), nil
 }

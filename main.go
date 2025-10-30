@@ -38,6 +38,8 @@ var (
     securityPolicy = flag.String("security-policy", "Basic256", "Security policy: None, Basic128Rsa15, Basic256, Basic256Sha256")
     securityMode   = flag.String("security-mode", "SignAndEncrypt", "Security mode: None, Sign, SignAndEncrypt")
     authMethod     = flag.String("auth-method", "UserName", "Authentication method: UserName, Anonymous")
+    bits           = flag.Bool("bits", false, "Extract all 32 bits individually from uint32 value. Requires --format influx")
+    bitNames       = flag.String("bit-names", "", "Comma-separated names for all 32 bits (must be exactly 32 names)")
 )
 
 // Calculate a port number based on connection name
@@ -205,8 +207,15 @@ func main() {
             printUsage()
             os.Exit(1)
         }
+
+        // Validate bit expansion flags
+        if *bits && *outputFormat != "influx" {
+            fmt.Fprintf(os.Stderr, "Error: --bits requires --format influx\n")
+            os.Exit(1)
+        }
+
         nodeIDs := args[2:]
-        value, err := getNodeValues(nodeIDs, *serviceHost, actualPort, *outputFormat, *measurement)
+        value, err := getNodeValues(nodeIDs, *serviceHost, actualPort, *outputFormat, *measurement, *bits, *bitNames)
         if err != nil {
             handleConnectionError(err)
         }
