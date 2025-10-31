@@ -1,5 +1,8 @@
 FROM telegraf:latest
 
+# Pin plccli version for reproducible builds across architectures
+ARG PLCCLI_VERSION=v0.3.5
+
 # Install dependencies including networking tools
 RUN apt-get update && apt-get install -y \
     curl \
@@ -15,8 +18,8 @@ RUN apt-get update && apt-get install -y \
 RUN set -x \
     && ARCH=$(uname -m) \
     && if [ "$ARCH" = "aarch64" ]; then PLCCLI_ARCH="arm64"; elif [ "$ARCH" = "x86_64" ]; then PLCCLI_ARCH="amd64"; else PLCCLI_ARCH="amd64"; fi \
-    && echo "Detected architecture: $ARCH, using plccli arch: $PLCCLI_ARCH" \
-    && curl -L "https://github.com/o16s/plccli/releases/latest/download/plccli-linux-${PLCCLI_ARCH}.tar.gz" -o plccli.tar.gz \
+    && echo "Installing plccli ${PLCCLI_VERSION} for architecture: $ARCH (plccli arch: $PLCCLI_ARCH)" \
+    && curl -L "https://github.com/o16s/plccli/releases/download/${PLCCLI_VERSION}/plccli-linux-${PLCCLI_ARCH}.tar.gz" -o plccli.tar.gz \
     && tar -xzf plccli.tar.gz \
     && mv "plccli-linux-${PLCCLI_ARCH}" /usr/bin/plccli \
     && chmod +x /usr/bin/plccli \
