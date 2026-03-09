@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -64,11 +65,8 @@ func startService(endpoint, username, password, certfile, keyfile string,
 		os.Exit(0)
 	}()
 	
-	// Connect to OPCUA server
-	err := connectOPCUA(ctx, endpoint, username, password, certfile, keyfile, gencert, appuri, timeout)
-	if err != nil {
-		log.Fatalf("[%s] Failed to connect to OPCUA server: %v", connectionName, err)
-	}
+	// Connect to OPCUA server with infinite retries
+	connectWithRetry(ctx, endpoint, username, password, certfile, keyfile, gencert, appuri, timeout)
 
     http.HandleFunc("/api/browse", func(w http.ResponseWriter, r *http.Request) {
         handleBrowseRequest(w, r)
@@ -431,7 +429,80 @@ func connectOPCUA(ctx context.Context, endpoint, username, password, certfile, k
 }
 
 
-func reconnectOPCUA(ctx context.Context, endpoint, username, password, certfile, keyfile string, 
+// connectWithRetry attempts to connect with infinite retries and exponential backoff with jitter
+func connectWithRetry(ctx context.Context, endpoint, username, password, certfile, keyfile string,
+                      gencert bool, appuri string, timeout int) {
+    // Seed random number generator with current time
+    rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+    // Add initial random jitter (0-300 seconds = 5 minutes) to desynchronize containers that start simultaneously
+    // With ~19 containers and connection attempts taking up to 5 minutes, this spreads the load significantly
+    initialJitter := time.Duration(rnd.Intn(300)) * time.Second
+    log.Printf("[%s] Adding initial jitter of %v to desynchronize startup", connectionName, initialJitter)
+
+    select {
+    case <-time.After(initialJitter):
+        // Continue to connection attempts
+    case <-ctx.Done():
+        log.Printf("[%s] Context cancelled during initial jitter", connectionName)
+        return
+    }
+
+    attempt := 0
+    for {
+        // Check if context is cancelled
+        if ctx.Err() != nil {
+            log.Printf("[%s] Context cancelled, stopping connection attempts", connectionName)
+            return
+        }
+
+        attempt++
+        log.Printf("[%s] Initial connection attempt %d...", connectionName, attempt)
+
+        // Create a fresh context for each attempt
+        connectTimeout := time.Duration(timeout) * time.Second
+        connectCtx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+
+        err := connectOPCUA(connectCtx, endpoint, username, password, certfile, keyfile, gencert, appuri, timeout)
+        cancel()
+
+        if err == nil {
+            log.Printf("[%s] Successfully connected on attempt %d", connectionName, attempt)
+            return
+        }
+
+        log.Printf("[%s] Connection attempt %d failed: %v", connectionName, attempt, err)
+
+        // Calculate exponential backoff, capped at 180 seconds (3 minutes)
+        // Given that connection attempts can take up to 5 minutes, we want reasonable spacing
+        backoffExponent := attempt - 1
+        if backoffExponent > 7 {
+            backoffExponent = 7  // Cap at 2^7 = 128 seconds
+        }
+        baseBackoff := time.Duration(1<<uint(backoffExponent)) * time.Second
+        if baseBackoff > 180*time.Second {
+            baseBackoff = 180 * time.Second
+        }
+
+        // Add random jitter (±50%) to prevent synchronized retry storms
+        jitterPercent := 0.5 + rnd.Float64()  // Random value between 0.5 and 1.5 (±50% around 1.0)
+        backoffTime := time.Duration(float64(baseBackoff) * jitterPercent)
+
+        log.Printf("[%s] Waiting %v (base: %v + jitter) before retry attempt %d...",
+            connectionName, backoffTime, baseBackoff, attempt+1)
+
+        // Sleep with context awareness
+        select {
+        case <-time.After(backoffTime):
+            // Continue to next attempt
+        case <-ctx.Done():
+            log.Printf("[%s] Context cancelled during backoff, stopping connection attempts", connectionName)
+            return
+        }
+    }
+}
+
+func reconnectOPCUA(ctx context.Context, endpoint, username, password, certfile, keyfile string,
                    gencert bool, appuri string, timeout int) {
     log.Printf("[%s] Attempting to reconnect...", connectionName)
 
@@ -440,7 +511,7 @@ func reconnectOPCUA(ctx context.Context, endpoint, username, password, certfile,
         log.Printf("[%s] Context already cancelled, skipping reconnection", connectionName)
         return
     }
-    
+
     // Force close existing connection if any
     clientMutex.Lock()
     if opcuaClient != nil {
@@ -451,42 +522,65 @@ func reconnectOPCUA(ctx context.Context, endpoint, username, password, certfile,
         opcuaClient = nil
     }
     clientMutex.Unlock()
-    
+
     // Add a small delay to ensure server-side cleanup
     time.Sleep(2 * time.Second)
-    
-    // Implement exponential backoff for reconnection
-    maxRetries := 10 // Increased from 5
-    for attempt := 0; attempt < maxRetries; attempt++ {
+
+    // Seed random number generator for jitter
+    rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+    // Infinite retry loop with exponential backoff and jitter
+    attempt := 0
+    for {
+        if ctx.Err() != nil {
+            log.Printf("[%s] Context cancelled, stopping reconnection attempts", connectionName)
+            return
+        }
+
+        attempt++
+        log.Printf("[%s] Reconnection attempt %d...", connectionName, attempt)
+
         // Create a fresh context for each attempt
         reconnectTimeout := time.Duration(timeout) * time.Second
         reconnectCtx, cancel := context.WithTimeout(context.Background(), reconnectTimeout)
-        
-        log.Printf("[%s] Reconnection attempt %d/%d...", connectionName, attempt+1, maxRetries)
-        
+
         // Complete new connection attempt
         err := connectOPCUA(reconnectCtx, endpoint, username, password, certfile, keyfile, gencert, appuri, timeout)
         cancel()
-        
-        if err != nil {
-            log.Printf("[%s] Reconnection attempt %d failed: %v", connectionName, attempt+1, err)
-            
-            // Wait before retrying, with exponential backoff
-            if attempt < maxRetries-1 {
-                backoffTime := time.Duration(1<<uint(attempt)) * time.Second
-                if backoffTime > 30*time.Second {
-                    backoffTime = 30 * time.Second
-                }
-                log.Printf("[%s] Waiting %v before next attempt...", connectionName, backoffTime)
-                time.Sleep(backoffTime)
-            }
-        } else {
-            log.Printf("[%s] Reconnection successful on attempt %d", connectionName, attempt+1)
+
+        if err == nil {
+            log.Printf("[%s] Reconnection successful on attempt %d", connectionName, attempt)
+            return
+        }
+
+        log.Printf("[%s] Reconnection attempt %d failed: %v", connectionName, attempt, err)
+
+        // Calculate exponential backoff with jitter, capped at 180 seconds
+        backoffExponent := attempt - 1
+        if backoffExponent > 7 {
+            backoffExponent = 7  // Cap at 2^7 = 128 seconds
+        }
+        baseBackoff := time.Duration(1<<uint(backoffExponent)) * time.Second
+        if baseBackoff > 180*time.Second {
+            baseBackoff = 180 * time.Second
+        }
+
+        // Add random jitter (±50%)
+        jitterPercent := 0.5 + rnd.Float64()
+        backoffTime := time.Duration(float64(baseBackoff) * jitterPercent)
+
+        log.Printf("[%s] Waiting %v (base: %v + jitter) before reconnection attempt %d...",
+            connectionName, backoffTime, baseBackoff, attempt+1)
+
+        // Sleep with context awareness
+        select {
+        case <-time.After(backoffTime):
+            // Continue to next attempt
+        case <-ctx.Done():
+            log.Printf("[%s] Context cancelled during reconnection backoff", connectionName)
             return
         }
     }
-    
-    log.Printf("[%s] Failed to reconnect after %d attempts, will try again on next keep-alive check", connectionName, maxRetries)
 }
 
 func handleNodeRequest(w http.ResponseWriter, r *http.Request) {
