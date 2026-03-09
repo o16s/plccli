@@ -1,7 +1,7 @@
 FROM telegraf:latest
 
 # Pin plccli version for reproducible builds across architectures
-ARG PLCCLI_VERSION=v0.3.5
+ARG PLCCLI_VERSION=v0.3.7
 
 # Install dependencies including networking tools
 RUN apt-get update && apt-get install -y \
