@@ -4,7 +4,7 @@ Comprehensive integration test suite for plccli on Siemens S7-1200 PLC.
 
 ## Test Coverage
 
-- **15 DTL tests**: Siemens DTL (Date Time Long) data type
+- **15 DTL tests**: Custom OPC_DTL (Date Time Long) data type
 - **12 Regression tests**: All standard data types (boolean, int32, uint16, etc.)
 - **5 Service tests**: Health checks and connection stability
 - **3 Format tests**: Default and InfluxDB output formats
@@ -202,7 +202,7 @@ jobs:
 ## Test Categories
 
 ### DTL Tests
-Tests specific to Siemens DTL (Date Time Long) data type:
+Tests specific to custom OPC_DTL (Date Time Long) data type:
 - ISO 8601 format parsing
 - Space-separated format
 - RFC3339 with timezone

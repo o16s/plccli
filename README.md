@@ -318,11 +318,11 @@ services:
 
 `boolean`, `sbyte`, `byte`, `int16`, `uint16`, `int32`, `uint32`, `int64`, `uint64`, `float`, `double`, `string`, `dtl`
 
-### Siemens DTL (Date Time Long) Support
+### DTL (Date Time Long) Support
 
-**Tested on Siemens S7-1200**
+**Custom OPC_DTL Type**
 
-The DTL data type is specific to Siemens PLCs and represents a date/time structure with 8 fields (YEAR, MONTH, DAY, WEEKDAY, HOUR, MINUTE, SECOND, NANOSECOND).
+The DTL data type is a custom OPC UA type (not a Siemens standard) that represents a date/time structure with 8 fields (YEAR, MONTH, DAY, WEEKDAY, HOUR, MINUTE, SECOND, NANOSECOND).
 
 #### Writing DTL Values
 

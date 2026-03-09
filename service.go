@@ -1146,9 +1146,10 @@ func getTokenTypes(tokens []*ua.UserTokenPolicy) []string {
     return types
 }
 
-// parseDTL parses ISO 8601 datetime string to Siemens DTL components
+// parseDTL parses ISO 8601 datetime string to custom OPC_DTL components
 // Accepts: "2025-03-09T14:30:00" or "2025-03-09 14:30:00"
 // Returns: year, month, day, weekday, hour, minute, second, nanosecond, error
+// Note: OPC_DTL is a custom type, not a Siemens standard type
 func parseDTL(dtlStr string) (uint16, uint8, uint8, uint8, uint8, uint8, uint8, uint32, error) {
 	// Try RFC3339 with timezone first: "2025-03-09T14:30:00Z"
 	t, err := time.Parse(time.RFC3339, dtlStr)
