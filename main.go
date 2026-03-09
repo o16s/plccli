@@ -71,7 +71,7 @@ func printUsage() {
     fmt.Println("       plccli [flags] opcua set <node-id> <value> <data-type>")
     fmt.Println("       plccli [flags] opcua browse [node-id] [max-depth]")
     fmt.Println("\nNode ID format: ns=X;i=NUMBER or ns=X;s=STRING (can use comma or semicolon separator)")
-    fmt.Println("\nAvailable data types for set: boolean, sbyte, byte, int16, uint16, int32, uint32, int64, uint64, float, double, string")
+    fmt.Println("\nAvailable data types for set: boolean, sbyte, byte, int16, uint16, int32, uint32, int64, uint64, float, double, string, dtl")
     fmt.Println("\nOutput formats (--format flag):")
     fmt.Println("  default - Human-readable output")
     fmt.Println("  influx  - InfluxDB Line Protocol format")
@@ -91,6 +91,7 @@ func printUsage() {
     fmt.Println("  plccli --service --endpoint opc.tcp://192.168.1.100:4840 --username user --password pass")
     fmt.Println("  plccli --format influx --measurement temperature opcua get ns=0;i=2258")
     fmt.Println("  plccli --service-host 192.168.1.50 opcua get ns=0;i=2258")
+    fmt.Println("  plccli opcua set ns=4;i=38 \"2025-03-09T14:30:00\" dtl")
     fmt.Printf("\nplccli %s (%s, built %s)\n", buildVersion, buildCommit, buildTime)
     flag.PrintDefaults()
 }

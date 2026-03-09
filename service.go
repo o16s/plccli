@@ -548,15 +548,28 @@ func handleNodeRequest(w http.ResponseWriter, r *http.Request) {
     
     node := client.Node(id)
     value, err := node.Value(ctx)
-    
+
     if err != nil {
+        // Check if this might be a DTL node (error indicates ExtensionObject decode failure)
+        if strings.Contains(err.Error(), "extension object") || strings.Contains(err.Error(), "data type id") {
+            // Try reading as DTL
+            dtlValue, dtlErr := readDTLFields(ctx, client, id)
+            if dtlErr == nil {
+                sendJSONResponse(w, NodeResponse{
+                    NodeID: nodeIDStr,
+                    Value:  dtlValue,
+                })
+                return
+            }
+        }
+
         sendJSONResponse(w, NodeResponse{
             NodeID: nodeIDStr,
             Error:  fmt.Sprintf("Failed to read node: %v", err),
         })
         return
     }
-    
+
     // Return the value
     sendJSONResponse(w, NodeResponse{
         NodeID: nodeIDStr,
@@ -863,11 +876,38 @@ func handleNodeWriteRequest(w http.ResponseWriter, r *http.Request) {
         
     case "string":
         variant, err = ua.NewVariant(writeRequest.Value)
-        
+
+    case "dtl":
+        year, month, day, weekday, hour, minute, second, nanosecond, err := parseDTL(writeRequest.Value)
+        if err != nil {
+            sendJSONResponse(w, NodeResponse{
+                NodeID: nodeIDStr,
+                Error:  fmt.Sprintf("Invalid DTL format: %v", err),
+            })
+            return
+        }
+
+        // Write DTL by setting individual child fields
+        err = writeDTLFields(ctx, client, id, year, month, day, weekday, hour, minute, second, nanosecond)
+        if err != nil {
+            sendJSONResponse(w, NodeResponse{
+                NodeID: nodeIDStr,
+                Error:  fmt.Sprintf("Failed to write DTL: %v", err),
+            })
+            return
+        }
+
+        // DTL write succeeded, return success
+        sendJSONResponse(w, NodeResponse{
+            NodeID: nodeIDStr,
+            Value:  writeRequest.Value,
+        })
+        return
+
     default:
         sendJSONResponse(w, NodeResponse{
             NodeID: nodeIDStr,
-            Error:  fmt.Sprintf("Unsupported data type: %s. Use one of: boolean, sbyte, byte, int16, uint16, int32, uint32, int64, uint64, float, double, string", writeRequest.DataType),
+            Error:  fmt.Sprintf("Unsupported data type: %s. Use one of: boolean, sbyte, byte, int16, uint16, int32, uint32, int64, uint64, float, double, string, dtl", writeRequest.DataType),
         })
         return
     }
@@ -1010,4 +1050,188 @@ func getTokenTypes(tokens []*ua.UserTokenPolicy) []string {
         }
     }
     return types
+}
+
+// parseDTL parses ISO 8601 datetime string to Siemens DTL components
+// Accepts: "2025-03-09T14:30:00" or "2025-03-09 14:30:00"
+// Returns: year, month, day, weekday, hour, minute, second, nanosecond, error
+func parseDTL(dtlStr string) (uint16, uint8, uint8, uint8, uint8, uint8, uint8, uint32, error) {
+	// Try RFC3339 with timezone first: "2025-03-09T14:30:00Z"
+	t, err := time.Parse(time.RFC3339, dtlStr)
+	if err != nil {
+		// Try ISO 8601 without timezone: "2025-03-09T14:30:00"
+		t, err = time.Parse("2006-01-02T15:04:05", dtlStr)
+		if err != nil {
+			// Try space-separated format: "2025-03-09 14:30:00"
+			t, err = time.Parse("2006-01-02 15:04:05", dtlStr)
+			if err != nil {
+				return 0, 0, 0, 0, 0, 0, 0, 0, fmt.Errorf("invalid datetime format. Use: 2025-03-09T14:30:00")
+			}
+		}
+	}
+
+	// Extract components
+	year := uint16(t.Year())
+	month := uint8(t.Month())
+	day := uint8(t.Day())
+	hour := uint8(t.Hour())
+	minute := uint8(t.Minute())
+	second := uint8(t.Second())
+	nanosecond := uint32(0) // Keep it simple, don't use sub-second precision
+
+	// Calculate weekday: Go's Sunday=0, Siemens expects Sunday=1
+	weekday := uint8(t.Weekday() + 1)
+	if weekday > 7 {
+		weekday = 1
+	}
+
+	return year, month, day, weekday, hour, minute, second, nanosecond, nil
+}
+
+// writeDTLFields writes DTL values to individual child fields
+// DTL child fields follow pattern: parent_id+1 (YEAR), parent_id+2 (MONTH), etc.
+func writeDTLFields(ctx context.Context, client *opcua.Client, parentID *ua.NodeID, year uint16, month, day, weekday, hour, minute, second uint8, nanosecond uint32) error {
+	// Extract namespace and identifier from parent node
+	namespace := parentID.Namespace()
+	identifier := parentID.IntID()
+
+	// Create write values for all 8 DTL child fields
+	// Child field offsets: YEAR(+1), MONTH(+2), DAY(+3), WEEKDAY(+4), HOUR(+5), MINUTE(+6), SECOND(+7), NANOSECOND(+8)
+	writeValues := []*ua.WriteValue{
+		{
+			NodeID:      ua.NewNumericNodeID(namespace, identifier+1), // YEAR
+			AttributeID: ua.AttributeIDValue,
+			Value: &ua.DataValue{
+				EncodingMask: ua.DataValueValue,
+				Value:        mustVariant(ua.NewVariant(year)),
+			},
+		},
+		{
+			NodeID:      ua.NewNumericNodeID(namespace, identifier+2), // MONTH
+			AttributeID: ua.AttributeIDValue,
+			Value: &ua.DataValue{
+				EncodingMask: ua.DataValueValue,
+				Value:        mustVariant(ua.NewVariant(month)),
+			},
+		},
+		{
+			NodeID:      ua.NewNumericNodeID(namespace, identifier+3), // DAY
+			AttributeID: ua.AttributeIDValue,
+			Value: &ua.DataValue{
+				EncodingMask: ua.DataValueValue,
+				Value:        mustVariant(ua.NewVariant(day)),
+			},
+		},
+		{
+			NodeID:      ua.NewNumericNodeID(namespace, identifier+4), // WEEKDAY
+			AttributeID: ua.AttributeIDValue,
+			Value: &ua.DataValue{
+				EncodingMask: ua.DataValueValue,
+				Value:        mustVariant(ua.NewVariant(weekday)),
+			},
+		},
+		{
+			NodeID:      ua.NewNumericNodeID(namespace, identifier+5), // HOUR
+			AttributeID: ua.AttributeIDValue,
+			Value: &ua.DataValue{
+				EncodingMask: ua.DataValueValue,
+				Value:        mustVariant(ua.NewVariant(hour)),
+			},
+		},
+		{
+			NodeID:      ua.NewNumericNodeID(namespace, identifier+6), // MINUTE
+			AttributeID: ua.AttributeIDValue,
+			Value: &ua.DataValue{
+				EncodingMask: ua.DataValueValue,
+				Value:        mustVariant(ua.NewVariant(minute)),
+			},
+		},
+		{
+			NodeID:      ua.NewNumericNodeID(namespace, identifier+7), // SECOND
+			AttributeID: ua.AttributeIDValue,
+			Value: &ua.DataValue{
+				EncodingMask: ua.DataValueValue,
+				Value:        mustVariant(ua.NewVariant(second)),
+			},
+		},
+		{
+			NodeID:      ua.NewNumericNodeID(namespace, identifier+8), // NANOSECOND
+			AttributeID: ua.AttributeIDValue,
+			Value: &ua.DataValue{
+				EncodingMask: ua.DataValueValue,
+				Value:        mustVariant(ua.NewVariant(nanosecond)),
+			},
+		},
+	}
+
+	// Execute the batch write operation
+	req := &ua.WriteRequest{
+		NodesToWrite: writeValues,
+	}
+
+	resp, err := client.Write(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed to write DTL fields: %v", err)
+	}
+
+	// Check all write results
+	for i, status := range resp.Results {
+		if status != ua.StatusOK {
+			fieldNames := []string{"YEAR", "MONTH", "DAY", "WEEKDAY", "HOUR", "MINUTE", "SECOND", "NANOSECOND"}
+			return fmt.Errorf("failed to write %s field: %v", fieldNames[i], status)
+		}
+	}
+
+	return nil
+}
+
+// readDTLFields reads DTL values from individual child fields and formats as datetime string
+func readDTLFields(ctx context.Context, client *opcua.Client, parentID *ua.NodeID) (string, error) {
+	namespace := parentID.Namespace()
+	identifier := parentID.IntID()
+
+	// Read all 8 child fields
+	req := &ua.ReadRequest{
+		NodesToRead: []*ua.ReadValueID{
+			{NodeID: ua.NewNumericNodeID(namespace, identifier+1), AttributeID: ua.AttributeIDValue}, // YEAR
+			{NodeID: ua.NewNumericNodeID(namespace, identifier+2), AttributeID: ua.AttributeIDValue}, // MONTH
+			{NodeID: ua.NewNumericNodeID(namespace, identifier+3), AttributeID: ua.AttributeIDValue}, // DAY
+			{NodeID: ua.NewNumericNodeID(namespace, identifier+4), AttributeID: ua.AttributeIDValue}, // WEEKDAY
+			{NodeID: ua.NewNumericNodeID(namespace, identifier+5), AttributeID: ua.AttributeIDValue}, // HOUR
+			{NodeID: ua.NewNumericNodeID(namespace, identifier+6), AttributeID: ua.AttributeIDValue}, // MINUTE
+			{NodeID: ua.NewNumericNodeID(namespace, identifier+7), AttributeID: ua.AttributeIDValue}, // SECOND
+			{NodeID: ua.NewNumericNodeID(namespace, identifier+8), AttributeID: ua.AttributeIDValue}, // NANOSECOND
+		},
+	}
+
+	resp, err := client.Read(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("failed to read DTL fields: %v", err)
+	}
+
+	// Extract values
+	if len(resp.Results) != 8 {
+		return "", fmt.Errorf("expected 8 DTL fields, got %d", len(resp.Results))
+	}
+
+	year, _ := resp.Results[0].Value.Value().(uint16)
+	month, _ := resp.Results[1].Value.Value().(uint8)
+	day, _ := resp.Results[2].Value.Value().(uint8)
+	// weekday := resp.Results[3].Value.Value().(uint8) // not needed for formatting
+	hour, _ := resp.Results[4].Value.Value().(uint8)
+	minute, _ := resp.Results[5].Value.Value().(uint8)
+	second, _ := resp.Results[6].Value.Value().(uint8)
+	// nanosecond := resp.Results[7].Value.Value().(uint32) // not used in output
+
+	// Format as ISO 8601 datetime string
+	dtlTime := time.Date(int(year), time.Month(month), int(day), int(hour), int(minute), int(second), 0, time.UTC)
+	return dtlTime.Format("2006-01-02T15:04:05"), nil
+}
+
+// Helper to unwrap variant (assumes variant creation never fails for simple types)
+func mustVariant(v *ua.Variant, err error) *ua.Variant {
+	if err != nil {
+		panic(err)
+	}
+	return v
 }

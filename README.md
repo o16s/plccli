@@ -11,6 +11,10 @@
 curl -s https://raw.githubusercontent.com/o16s/plccli/main/install.sh | bash
 ```
 
+## Compatibility
+
+Tested on Siemens S7-1200.
+
 ## Basic Usage
 
 ### Starting the Service
@@ -312,7 +316,54 @@ services:
 
 ### Available Data Types for Writing
 
-`boolean`, `sbyte`, `byte`, `int16`, `uint16`, `int32`, `uint32`, `int64`, `uint64`, `float`, `double`, `string`
+`boolean`, `sbyte`, `byte`, `int16`, `uint16`, `int32`, `uint32`, `int64`, `uint64`, `float`, `double`, `string`, `dtl`
+
+### Siemens DTL (Date Time Long) Support
+
+**Tested on Siemens S7-1200**
+
+The DTL data type is specific to Siemens PLCs and represents a date/time structure with 8 fields (YEAR, MONTH, DAY, WEEKDAY, HOUR, MINUTE, SECOND, NANOSECOND).
+
+#### Writing DTL Values
+
+```bash
+# ISO 8601 format with T separator
+plccli opcua set "ns=4;i=38" "2025-03-09T14:30:00" dtl
+
+# Space-separated format also supported
+plccli opcua set "ns=4;i=38" "2025-03-09 14:30:00" dtl
+
+# With timezone (RFC3339)
+plccli opcua set "ns=4;i=38" "2025-03-09T14:30:00Z" dtl
+```
+
+#### Reading DTL Values
+
+```bash
+# Read DTL field - returns formatted datetime string
+plccli opcua get "ns=4;i=38"
+# Output: opcua_node,node_id=ns\=4\,i\=38,endpoint=... value=1,string_value="2025-03-09T14:30:00" ...
+```
+
+#### How DTL Works
+
+- **Write**: plccli automatically parses the datetime string and writes to all 8 child fields (YEAR, MONTH, DAY, etc.)
+- **Read**: plccli detects DTL nodes and reads all 8 child fields, formatting them as an ISO 8601 datetime string
+- **Weekday**: Automatically calculated from the date (Sunday=1, Monday=2, etc.)
+- **Nanosecond**: Set to 0 for simplicity
+
+#### DTL Field Structure
+
+When browsing, DTL nodes show 8 child fields with numeric node IDs following a pattern:
+- Parent node: `ns=4;i=38` (date_time_test)
+- `+1`: YEAR (uint16)
+- `+2`: MONTH (byte)
+- `+3`: DAY (byte)
+- `+4`: WEEKDAY (byte)
+- `+5`: HOUR (byte)
+- `+6`: MINUTE (byte)
+- `+7`: SECOND (byte)
+- `+8`: NANOSECOND (uint32)
 
 ## Troubleshooting
 
